@@ -74,3 +74,17 @@ test('the band keeps what other mods drew', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /parked/ }))?.text).toContain('1 parked')
   await ui.unmount()
 })
+
+test('a prompt that ends in /park is parked, not sent', async ($, on) => {
+  const { files, submitted } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const parked = await $.prompt.submit({ text: 'check the retry path /park', origin: { kind: 'composer' } } as any)
+  expect(parked).toEqual({ drop: 'Parked #1.' })
+  expect(submitted).toEqual([])
+  expect(files.get('/home/me/.claude/parked/parked.md')).toContain('check the retry path')
+
+  await $.prompt.submit({ text: 'a path like src/park stays a prompt', origin: { kind: 'composer' } } as any)
+  await $.prompt.submit({ text: '/park', origin: { kind: 'composer' } } as any)
+  expect(submitted).toEqual(['a path like src/park stays a prompt', '/park'])
+})

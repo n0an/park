@@ -94,6 +94,19 @@ const preview = (body: string) => {
   return line.length > 100 ? `${line.slice(0, 99)}…` : line
 }
 
+/** A prompt that ends in "/park", the thought before it. */
+const TRAILING = /^([\s\S]*\S)\s+\/park\s*$/
+
+/** Appends one thought, shows the toast, and returns how many are parked. */
+const park = async ($: Engine, folder: string, body: string): Promise<number> => {
+  const at = await resolvePaths($, folder)
+  const entries = await load($, at)
+  entries.push({ title: await stamp($), body })
+  await save($, at, entries)
+  $.ui.toast(`Parked (${entries.length})`)
+  return entries.length
+}
+
 const USAGE =
   '/parked: list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
 
@@ -120,12 +133,18 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'park' }, async ($, e) => {
     const body = e.args.trim()
     if (body === '') return { text: 'Usage: /park <thought>' }
-    const at = await resolvePaths($, folder)
-    const entries = await load($, at)
-    entries.push({ title: await stamp($), body })
-    await save($, at, entries)
-    $.ui.toast(`Parked (${entries.length})`)
-    return { text: `Parked #${entries.length}.` }
+    const n = await park($, folder, body)
+    return { text: `Parked #${n}.` }
+  })
+
+  // "<thought> /park": a slash command only works at the start of the line,
+  // so a prompt that ends in /park is parked here and never enters the session.
+  on('prompt.submit', async ($, e, next) => {
+    const match = TRAILING.exec(e.text)
+    const body = match?.[1]?.trim() ?? ''
+    if (e.command || e.origin.kind !== 'composer' || body === '') return next(e)
+    const n = await park($, folder, body)
+    return { drop: `Parked #${n}.` }
   })
 
   on('command.run', { command: 'parked' }, async ($, e) => {

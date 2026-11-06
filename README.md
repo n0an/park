@@ -31,6 +31,7 @@ Park is the small tool between those two. The thought stays next to the session,
 ## What It Does
 
 - **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
+- **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked and never sent.
 - **A reminder above the prompt** - a dim `💡 N parked · /parked` line while anything is parked. It shares the band with other mods (a context meter, a button) and does not push them out.
 - **`/parked`** - lists what is parked, numbered, each with the time, the project and the git branch it was parked from.
 - **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.
@@ -83,14 +84,14 @@ The folder is created on the first `/park`. A leading `~` means your home folder
 
 ## Using Park
 
-1. While Claude works, a thought comes in. Type `/park` and the thought, then press Enter. If you already typed the thought, press `Ctrl+A` to go to the start of the line and add `/park ` in front.
+1. While Claude works, a thought comes in. Type `/park` and the thought, then press Enter. If you already typed the thought, add ` /park` at the end instead.
 2. Continue with the session. The line above the prompt shows how many thoughts are waiting.
 3. When you are ready, run `/parked` to see the list, then `/parked send` for all of them, or `/parked send 2` for one.
 
 
 ## What Reaches the Model
 
-The text after `/park` does not go to Claude: the command answers for itself, and the model sees only the short `Parked #N.` result.
+The text after `/park` does not go to Claude: the command answers for itself, and the model sees only the short `Parked #N.` result. A prompt that ends in `/park` is dropped before it enters the session, so the model sees nothing of it.
 
 The output of `/parked` is different. The list is printed in the transcript, and Claude can read it on its next turn. If you want a thought to stay out of the conversation completely, look at it in `parked.md` instead of listing it.
 
@@ -100,6 +101,7 @@ The output of `/parked` is different. The list is printed in the transcript, and
 Everything is one hooks module, [`hooks/register.tsx`](hooks/register.tsx):
 
 - `session.start` registers `/park` and `/parked` with `immediate: true`, so they run during a turn instead of waiting for it to end;
+- a `prompt.submit` hook catches a prompt that ends in `/park`, parks the text before it, and answers `{ drop }`, so the prompt never enters the session;
 - `command.run` hooks answer both commands themselves, so nothing goes on to the model, and read and write the two Markdown files with `$.fs`;
 - `/parked send` submits the prompt with `$.prompt.submit` from a zero-delay timer, because a command hook cannot submit a prompt while the turn waits on it;
 - a `ui.render` hook on `AbovePrompt` draws what the other mods drew (`next(e)`) and adds the counter after it;
