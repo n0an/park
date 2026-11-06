@@ -1,0 +1,122 @@
+<h1 align="center">Park</h1>
+
+<p align="center">
+    <img src="https://img.shields.io/badge/Claude%20Code-mod-D97757.svg" alt="Claude Code mod" />
+    <img src="https://img.shields.io/badge/version-0.1.0-blueviolet.svg" alt="Version 0.1.0" />
+    <img src="https://img.shields.io/badge/surface-terminal-2980b9.svg" alt="Terminal" />
+    <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="MIT License" />
+</p>
+
+A Claude Code mod for thoughts that arrive too early. Type `/park` in front of the idea and press Enter. The idea goes into a Markdown file, not into the conversation, and Claude keeps working on what it was doing. When the time is right, `/parked send` hands your parked ideas to Claude as a normal prompt.
+
+```
+/park Once this works, check the same race in the upload retry path
+```
+
+A mod changes Claude Code's own interface, unlike a skill, which changes what the agent knows. This one adds two slash commands and one line above the prompt.
+
+
+## The Idea
+
+In a long, active session with an agent, new thoughts often come in before their time. The agent is halfway through a refactor, and you suddenly see what should come after it, or a side question that matters later. If you send that thought now, it lands in the middle of the agent's turn and can pull it off course.
+
+The usual workarounds both cost something:
+
+- **Fork the session.** This works, but it is heavy for a one-line thought, and now you have one more session to track.
+- **Copy the thought to a notes app, delete it from the prompt, and remember to come back.** This is what I did most of the time. The thought leaves the place where it will be used, and nothing reminds you that it is waiting.
+
+Park is the small tool between those two. The thought stays next to the session, in a plain file. A counter above the prompt reminds you it is there, and one command returns it to the agent when you are ready.
+
+
+## What It Does
+
+- **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
+- **A reminder above the prompt** - a dim `💡 N parked · /parked` line while anything is parked. It shares the band with other mods (a context meter, a button) and does not push them out.
+- **`/parked`** - lists what is parked, numbered, each with the time, the project and the git branch it was parked from.
+- **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.
+- **`/parked drop n ...` and `/parked clear`** - removes thoughts you no longer need.
+- **Nothing is lost** - sent and dropped thoughts move to `parked-archive.md`, with the time and how they left.
+- **Plain Markdown** - `parked.md` is a normal file. Put it in your notes vault, edit it by hand, and the counter catches up after the next turn.
+
+
+## Installing
+
+At the prompt of a Claude Code terminal session:
+
+```
+/plugin install park --marketplace n0an/park
+```
+
+Answer `y` to add the marketplace, then choose whether the mod is installed for you or for one project.
+
+From a shell:
+
+```bash
+claude plugin install park --marketplace n0an/park
+```
+
+Then start a new session, or run `/reload-plugins` in an open one.
+
+To remove it:
+
+```bash
+claude plugin uninstall park
+```
+
+
+## Choosing Where Thoughts Go
+
+By default the files are in `~/.claude/parked/`. To keep them somewhere else, such as a folder in your notes vault, set the `folder` option: run `/plugin`, pick **park**, and fill in the folder. Or set it in `~/.claude/settings.json`:
+
+```json
+{
+  "pluginConfigs": {
+    "park@park": {
+      "options": { "folder": "~/Notes/Inbox" }
+    }
+  }
+}
+```
+
+The folder is created on the first `/park`. A leading `~` means your home folder.
+
+
+## Using Park
+
+1. While Claude works, a thought comes in. Type `/park` and the thought, then press Enter. If you already typed the thought, press `Ctrl+A` to go to the start of the line and add `/park ` in front.
+2. Continue with the session. The line above the prompt shows how many thoughts are waiting.
+3. When you are ready, run `/parked` to see the list, then `/parked send` for all of them, or `/parked send 2` for one.
+
+
+## What Reaches the Model
+
+The text after `/park` does not go to Claude: the command answers for itself, and the model sees only the short `Parked #N.` result.
+
+The output of `/parked` is different. The list is printed in the transcript, and Claude can read it on its next turn. If you want a thought to stay out of the conversation completely, look at it in `parked.md` instead of listing it.
+
+
+## How It Works
+
+Everything is one hooks module, [`hooks/register.tsx`](hooks/register.tsx):
+
+- `session.start` registers `/park` and `/parked` with `immediate: true`, so they run during a turn instead of waiting for it to end;
+- `command.run` hooks answer both commands themselves, so nothing goes on to the model, and read and write the two Markdown files with `$.fs`;
+- `/parked send` submits the prompt with `$.prompt.submit` from a zero-delay timer, because a command hook cannot submit a prompt while the turn waits on it;
+- a `ui.render` hook on `AbovePrompt` draws what the other mods drew (`next(e)`) and adds the counter after it;
+- `turn.complete` counts the entries again, so hand edits to the file show up.
+
+The time and branch in each entry come from `date` and `git branch --show-current`.
+
+
+## Contributing
+
+Contributions are welcome - bug fixes, new surfaces, or better ways to sort and search parked thoughts.
+
+- Keep the module small. It runs in every session the mod is installed in.
+- Run `claude plugin validate .` and `claude plugin test .` before opening a pull request.
+- All work must be licensed under the MIT license.
+
+
+## License
+
+Available under the [MIT License](LICENSE), which permits commercial use, modification, distribution, and private use.

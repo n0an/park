@@ -1,0 +1,17 @@
+{
+  "name": "park",
+  "version": "0.1.0",
+  "description": "Park a thought mid-session with /park so it stays out of the conversation until you send it with /parked send",
+  "author": { "name": "Anton Novoselov", "url": "https://github.com/n0an" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "folder": {
+      "type": "directory",
+      "title": "Parked thoughts folder",
+      "description": "Folder that holds parked.md and parked-archive.md, for example a folder in your notes vault. Leave blank for ~/.claude/parked.",
+      "default": "",
+      "sensitive": false
+    }
+  }
+}

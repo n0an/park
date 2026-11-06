@@ -1,0 +1,5 @@
+{
+  "name": "park",
+  "owner": { "name": "Anton Novoselov", "url": "https://github.com/n0an" },
+  "plugins": [{ "name": "park", "source": "./" }]
+}
