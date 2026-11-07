@@ -2,7 +2,7 @@
 
 <p align="center">
     <img src="https://img.shields.io/badge/Claude%20Code-mod-D97757.svg" alt="Claude Code mod" />
-    <img src="https://img.shields.io/badge/version-0.1.0-blueviolet.svg" alt="Version 0.1.0" />
+    <img src="https://img.shields.io/badge/version-0.2.1-blueviolet.svg" alt="Version 0.2.1" />
     <img src="https://img.shields.io/badge/surface-terminal-2980b9.svg" alt="Terminal" />
     <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="MIT License" />
 </p>
@@ -87,14 +87,17 @@ The folder is created on the first `/park`. A leading `~` means your home folder
 
 1. While Claude works, a thought comes in. Type `/park` and the thought, then press Enter. If you already typed the thought, add ` /park` at the end instead.
 2. Continue with the session. The line above the prompt shows how many thoughts are waiting.
-3. When you are ready, run `/parked` to see the list, then `/parked send` for all of them, or `/parked send 2` for one.
+3. When you are ready, click a thought in the Parked pane. It lands in the prompt box at the cursor; edit it or press Enter. Closed the pane? Click `💡 N parked` or run `/parked` to bring it back.
+4. Prefer the keyboard? `/parked list` prints the numbered list, `/parked send` sends all of them, and `/parked send 2` sends one.
 
 
 ## What Reaches the Model
 
 The text after `/park` does not go to Claude: the command answers for itself, and the model sees only the short `Parked #N.` result. A prompt that ends in `/park` is dropped before it enters the session, so the model sees nothing of it.
 
-The output of `/parked` is different. The list is printed in the transcript, and Claude can read it on its next turn. If you want a thought to stay out of the conversation completely, look at it in `parked.md` instead of listing it.
+The Parked pane is not part of the conversation either: Claude does not see it. A thought you click goes into the prompt box, and reaches Claude only when you send that prompt.
+
+The output of `/parked list` is different. The list is printed in the transcript, and Claude can read it on its next turn. If you want a thought to stay out of the conversation completely, use the pane or `parked.md` instead of listing it.
 
 
 ## How It Works
@@ -102,11 +105,13 @@ The output of `/parked` is different. The list is printed in the transcript, and
 Everything is one hooks module, [`hooks/register.tsx`](hooks/register.tsx):
 
 - `session.start` registers `/park` and `/parked` with `immediate: true`, so they run during a turn instead of waiting for it to end;
-- a `prompt.submit` hook catches a prompt that ends in `/park`, parks the text before it, and answers `{ drop }`, so the prompt never enters the session;
+- a `prompt.submit` hook catches a prompt that ends in `/park`, parks the text before it, and answers `{ drop }`, so the prompt never enters the session; the engine puts a dropped prompt back in the box, so a timer then empties the box with `$.prompt.fill`, but only while it still holds the parked text;
 - `command.run` hooks answer both commands themselves, so nothing goes on to the model, and read and write the two Markdown files with `$.fs`;
 - `/parked send` submits the prompt with `$.prompt.submit` from a zero-delay timer, because a command hook cannot submit a prompt while the turn waits on it;
-- a `ui.render` hook on `AbovePrompt` draws what the other mods drew (`next(e)`) and adds the counter after it;
-- `turn.complete` counts the entries again, so hand edits to the file show up.
+- a `ui.render` hook on `Pane` draws the Parked pane, opened with `$.ui.open`: each thought is a `Button` whose press inserts its text with `$.prompt.fill({ mode: 'insert' })` and moves it to the archive;
+- a `ui.render` hook on `AbovePrompt` draws what the other mods drew (`next(e)`) and adds the counter after it, as a button that opens or closes the pane;
+- the list the pane and the counter draw lives in `$.state`, so a redraw follows each change;
+- `turn.complete` reads the file again, so hand edits show up.
 
 The time and branch in each entry come from `date` and `git branch --show-current`.
 
