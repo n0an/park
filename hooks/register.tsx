@@ -60,6 +60,16 @@ const isSame = (a: Entry, b: Entry) => a.title === b.title && a.body === b.body
 
 const openPane = ($: Engine) => $.ui.open({ id: PANE, title: 'Parked', columns: 44 })
 
+/** Closes the pane while it is on screen; otherwise opens it (or brings its tab up). */
+const togglePane = async ($: Engine): Promise<'opened' | 'closed' | 'waiting'> => {
+  const pane = (await $.ui.panes()).find(one => one.id === PANE)
+  if (pane?.isPlaced && pane.isShown) {
+    await $.ui.close({ id: PANE })
+    return 'closed'
+  }
+  return (await openPane($)).isPlaced ? 'opened' : 'waiting'
+}
+
 /** Takes one thought out of the file into the archive; closes the pane once none is left. */
 const take = async ($: Engine, folder: string, one: Entry, how: string) => {
   const at = await resolvePaths($, folder)
@@ -151,7 +161,7 @@ const park = async ($: Engine, folder: string, body: string): Promise<number> =>
 }
 
 const USAGE =
-  '/parked: the pane · /parked list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
+  '/parked: open or close the pane · /parked list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
 
 export const register: Register = (on, options) => {
   const folder = typeof options.folder === 'string' ? options.folder : ''
@@ -204,8 +214,8 @@ export const register: Register = (on, options) => {
     await update($, parked, () => entries)
 
     if (verb === '') {
-      const opened = await openPane($)
-      if (opened.isPlaced) return { text: 'Parked pane opened.' }
+      const how = await togglePane($)
+      if (how !== 'waiting') return { text: `Parked pane ${how}.` }
     }
 
     if (verb === '' || verb === 'list') {
@@ -291,7 +301,7 @@ export const register: Register = (on, options) => {
       <Box>
         {below}
         <Text dimColor>{'  '}</Text>
-        <Button key="park-open" plain onPress={() => void openPane($)}>
+        <Button key="park-open" plain onPress={() => void togglePane($).catch(() => undefined)}>
           <Text dimColor>💡 {n} parked</Text>
         </Button>
       </Box>

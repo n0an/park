@@ -1,6 +1,6 @@
 {
   "name": "park",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Park a thought mid-session with /park so it stays out of the conversation until you send it with /parked send",
   "author": { "name": "Anton Novoselov", "url": "https://github.com/n0an" },
   "license": "MIT",

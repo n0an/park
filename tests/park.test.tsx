@@ -22,15 +22,22 @@ const engine = (on: any) => {
   })
   on('session.root', () => ({ value: '/home/me/app' }))
   on('ui.toast', () => ({ value: undefined }))
-  const panes = { opened: 0, closed: 0, isPlaced: false }
+  const panes = { opened: 0, closed: 0, isPlaced: false, isUp: false }
   on('ui.open', () => {
     panes.opened += 1
+    panes.isUp = panes.isPlaced
     return { value: { isPlaced: panes.isPlaced } }
   })
   on('ui.close', () => {
     panes.closed += 1
+    panes.isUp = false
     return { value: undefined }
   })
+  on('ui.panes', () => ({
+    value: panes.isUp
+      ? [{ id: 'parked', title: 'Parked', isShown: true, isFocused: false, isPlaced: true }]
+      : [],
+  }))
   on('clock.after', () => ({ value: undefined }))
   on('prompt.submit', (_: any, e: any) => {
     submitted.push(e.text)
@@ -156,12 +163,16 @@ test('parking opens the pane; a click inserts the thought and archives it', asyn
   await ui.unmount()
 })
 
-test('/parked opens the pane when it can, else lists', async ($, on) => {
+test('/parked toggles the pane when it can, else lists', async ($, on) => {
   const { panes } = engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run({ command: 'park', args: 'x' })
   panes.isPlaced = true
+  panes.isUp = false
+  expect((await $.command.run({ command: 'parked', args: '' })).text).toBe('Parked pane opened.')
+  expect((await $.command.run({ command: 'parked', args: '' })).text).toBe('Parked pane closed.')
   expect((await $.command.run({ command: 'parked', args: '' })).text).toBe('Parked pane opened.')
   panes.isPlaced = false
+  panes.isUp = false
   expect((await $.command.run({ command: 'parked', args: '' })).text).toContain('1. x')
 })
