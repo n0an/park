@@ -32,7 +32,7 @@ Park is the small tool between those two. The thought stays next to the session,
 
 - **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
 - **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked, never sent, and the prompt box is emptied for the next one.
-- **The Parked pane** - opens beside the conversation when you park something. Each thought is one row with the time, the project and the git branch it was parked from. Click a thought to insert it into the prompt box at the cursor; it moves to the archive. Click `×` to drop it. The pane closes when the list is empty. Clicks need the fullscreen terminal (`/tui fullscreen`).
+- **The Parked pane** - opens beside the conversation when you park something. Each thought is one row with the time, the project and the git branch it was parked from. Click a thought to insert it into the prompt box at the cursor; it moves to the archive. Click `×` to drop it. The pane closes when the list is empty. Clicks need the fullscreen terminal (`"tui": "fullscreen"` in settings.json).
 - **A reminder above the prompt** - a dim `💡 N parked` line while anything is parked; click it to open the pane. It shares the band with other mods (a context meter, a button) and does not push them out.
 - **`/parked`** - opens the pane. `/parked list` prints the numbered list instead.
 - **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.
