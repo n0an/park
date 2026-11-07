@@ -7,13 +7,13 @@
     <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="MIT License" />
 </p>
 
-A Claude Code mod for thoughts that arrive too early. Type `/park` in front of the idea and press Enter. The idea goes into a Markdown file, not into the conversation, and Claude keeps working on what it was doing. When the time is right, `/parked send` hands your parked ideas to Claude as a normal prompt.
+A Claude Code mod for thoughts that arrive too early. Type `/park` in front of the idea and press Enter. The idea goes into a Markdown file, not into the conversation, and Claude keeps working on what it was doing. When the time is right, click the idea in the Parked pane and it lands in your prompt box, ready to send.
 
 ```
 /park Once this works, check the same race in the upload retry path
 ```
 
-A mod changes Claude Code's own interface, unlike a skill, which changes what the agent knows. This one adds two slash commands and one line above the prompt.
+A mod changes Claude Code's own interface, unlike a skill, which changes what the agent knows. This one adds two slash commands, a pane and one line above the prompt.
 
 
 ## The Idea
@@ -25,15 +25,16 @@ The usual workarounds both cost something:
 - **Fork the session.** This works, but it is heavy for a one-line thought, and now you have one more session to track.
 - **Copy the thought to a notes app, delete it from the prompt, and remember to come back.** This is what I did most of the time. The thought leaves the place where it will be used, and nothing reminds you that it is waiting.
 
-Park is the small tool between those two. The thought stays next to the session, in a plain file. A counter above the prompt reminds you it is there, and one command returns it to the agent when you are ready.
+Park is the small tool between those two. The thought stays next to the session, in a plain file. A counter above the prompt reminds you it is there, and one click returns it to the prompt when you are ready.
 
 
 ## What It Does
 
 - **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
 - **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked, never sent, and the prompt box is emptied for the next one.
-- **A reminder above the prompt** - a dim `💡 N parked · /parked` line while anything is parked. It shares the band with other mods (a context meter, a button) and does not push them out.
-- **`/parked`** - lists what is parked, numbered, each with the time, the project and the git branch it was parked from.
+- **The Parked pane** - opens beside the conversation when you park something. Each thought is one row with the time, the project and the git branch it was parked from. Click a thought to insert it into the prompt box at the cursor; it moves to the archive. Click `×` to drop it. The pane closes when the list is empty. Clicks need the fullscreen terminal (`/tui fullscreen`).
+- **A reminder above the prompt** - a dim `💡 N parked` line while anything is parked; click it to open the pane. It shares the band with other mods (a context meter, a button) and does not push them out.
+- **`/parked`** - opens the pane. `/parked list` prints the numbered list instead.
 - **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.
 - **`/parked drop n ...` and `/parked clear`** - removes thoughts you no longer need.
 - **Nothing is lost** - sent and dropped thoughts move to `parked-archive.md`, with the time and how they left.

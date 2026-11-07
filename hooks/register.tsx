@@ -1,11 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import type { ParkEntry } from '../types'
+
 type Engine = EngineInterface
 type Paths = { file: string; archive: string }
 
 const HEADER =
-  '# Parked\n\nThoughts parked mid-session with `/park`. `/parked send` hands them to Claude; sent and dropped ones move to `parked-archive.md`.\n'
+  '# Parked\n\nThoughts parked mid-session with `/park`. Click one in the Parked pane (or `/parked send`) to hand it to Claude; sent and dropped ones move to `parked-archive.md`.\n'
+
+const PANE = 'parked'
 
 /** Where the two files live: the `folder` option, `~` expanded, else ~/.claude/parked. */
 const resolvePaths = async ($: Engine, folder: string): Promise<Paths> => {
@@ -15,9 +19,12 @@ const resolvePaths = async ($: Engine, folder: string): Promise<Paths> => {
   return { file: `${dir}/parked.md`, archive: `${dir}/parked-archive.md` }
 }
 
-const count = atom({ plugin: 'park', key: 'count' } as const, 0)
+// The parked list as the pane and the band draw it; the file stays the truth.
+const parked = atom({ plugin: 'park', key: 'entries' } as const, [] as ParkEntry[], {
+  shape: 'entries-1',
+})
 
-type Entry = { title: string; body: string }
+type Entry = ParkEntry
 
 const parse = (text: string): Entry[] =>
   text
@@ -40,7 +47,40 @@ const load = async ($: Engine, at: Paths): Promise<Entry[]> => {
 
 const save = async ($: Engine, at: Paths, entries: Entry[]) => {
   await $.fs.write(at.file, render(entries))
-  await update($, count, () => entries.length)
+  await update($, parked, () => entries)
+}
+
+const refresh = async ($: Engine, folder: string) => {
+  const entries = await load($, await resolvePaths($, folder))
+  await update($, parked, () => entries)
+  return entries
+}
+
+const isSame = (a: Entry, b: Entry) => a.title === b.title && a.body === b.body
+
+const openPane = ($: Engine) => $.ui.open({ id: PANE, title: 'Parked', columns: 44 })
+
+/** Takes one thought out of the file into the archive; closes the pane once none is left. */
+const take = async ($: Engine, folder: string, one: Entry, how: string) => {
+  const at = await resolvePaths($, folder)
+  const entries = await load($, at)
+  const rest = entries.filter(other => !isSame(other, one))
+  if (rest.length === entries.length) return
+  await archive($, at, [one], how)
+  await save($, at, rest)
+  if (rest.length === 0) await $.ui.close({ id: PANE })
+}
+
+/** A click on a thought: into the prompt box at the cursor, then out of the list. */
+const insert = async ($: Engine, folder: string, one: Entry) => {
+  const box = await $.prompt.read()
+  const gap = box.text !== '' && !/\s$/.test(box.text.slice(0, box.cursor)) ? ' ' : ''
+  const filled = await $.prompt.fill({ text: gap + one.body, mode: 'insert' })
+  if (!filled.isFilled) {
+    $.ui.toast('The prompt box is busy: try again')
+    return
+  }
+  await take($, folder, one, 'sent')
 }
 
 const run = async ($: Engine, argv: string[]): Promise<string> => {
@@ -89,10 +129,12 @@ const pick = (entries: Entry[], args: string[]) => {
   }
 }
 
-const preview = (body: string) => {
+const clip = (body: string, max: number) => {
   const line = body.replace(/\s+/g, ' ').trim()
-  return line.length > 100 ? `${line.slice(0, 99)}…` : line
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
+
+const preview = (body: string) => clip(body, 100)
 
 /** A prompt that ends in "/park", the thought before it. */
 const TRAILING = /^([\s\S]*\S)\s+\/park\s*$/
@@ -104,11 +146,12 @@ const park = async ($: Engine, folder: string, body: string): Promise<number> =>
   entries.push({ title: await stamp($), body })
   await save($, at, entries)
   $.ui.toast(`Parked (${entries.length})`)
+  void openPane($).catch(() => undefined)
   return entries.length
 }
 
 const USAGE =
-  '/parked: list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
+  '/parked: the pane · /parked list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
 
 export const register: Register = (on, options) => {
   const folder = typeof options.folder === 'string' ? options.folder : ''
@@ -121,12 +164,11 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'parked',
-      description: 'List parked thoughts, send them to Claude, or drop them',
-      argumentHint: '[send|drop|clear] [n ...]',
+      description: 'Open the Parked pane, or list, send or drop parked thoughts',
+      argumentHint: '[list|send|drop|clear] [n ...]',
       immediate: true,
     })
-    const entries = await load($, await resolvePaths($, folder))
-    await update($, count, () => entries.length)
+    await refresh($, folder)
     return next(e)
   })
 
@@ -159,7 +201,12 @@ export const register: Register = (on, options) => {
     const [verb = '', ...args] = e.args.trim().split(/\s+/).filter(Boolean)
     const at = await resolvePaths($, folder)
     const entries = await load($, at)
-    await update($, count, () => entries.length)
+    await update($, parked, () => entries)
+
+    if (verb === '') {
+      const opened = await openPane($)
+      if (opened.isPlaced) return { text: 'Parked pane opened.' }
+    }
 
     if (verb === '' || verb === 'list') {
       if (entries.length === 0) return { text: 'Nothing parked.' }
@@ -202,23 +249,51 @@ export const register: Register = (on, options) => {
 
   // The file is plain Markdown that may be edited by hand: re-count after each turn.
   on('turn.complete', async ($, e, next) => {
-    const entries = await load($, await resolvePaths($, folder))
-    await update($, count, () => entries.length)
+    await refresh($, folder)
     return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const entries = await read($, parked)
+    const width = Math.max(16, (e.viewport?.columns ?? 44) - 6)
+    if (entries.length === 0) return <Text dimColor>Nothing parked.</Text>
+    return (
+      <Box flexDirection="column">
+        {entries.map((one, i) => (
+          <Box key={`row-${i}-${one.title}`} flexDirection="row" marginBottom={1}>
+            <Box flexGrow={1} flexDirection="column">
+              <Button key={`insert-${i}-${one.title}`} plain onPress={() => void insert($, folder, one)}>
+                {clip(one.body, width * 2)}
+              </Button>
+              <Text dimColor>{one.title}</Text>
+            </Box>
+            <Button
+              key={`drop-${i}-${one.title}`}
+              plain
+              label="×"
+              onPress={() => void take($, folder, one, 'dropped')}
+            />
+          </Box>
+        ))}
+        <Text dimColor>Click to insert into the prompt · × to drop</Text>
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // The band holds one tree: keep whatever the plugins beneath drew.
     const below = await next(e)
-    const n = await read($, count)
+    const n = (await read($, parked)).length
     if (n === 0 || e.props.hasSurvey) return below
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box>
         {below}
-        <Text dimColor>
-          {'  '}💡 {n} parked · /parked
-        </Text>
+        <Text dimColor>{'  '}</Text>
+        <Button key="park-open" plain onPress={() => void openPane($)}>
+          <Text dimColor>💡 {n} parked</Text>
+        </Button>
       </Box>
     )
   })

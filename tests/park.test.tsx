@@ -22,6 +22,15 @@ const engine = (on: any) => {
   })
   on('session.root', () => ({ value: '/home/me/app' }))
   on('ui.toast', () => ({ value: undefined }))
+  const panes = { opened: 0, closed: 0, isPlaced: false }
+  on('ui.open', () => {
+    panes.opened += 1
+    return { value: { isPlaced: panes.isPlaced } }
+  })
+  on('ui.close', () => {
+    panes.closed += 1
+    return { value: undefined }
+  })
   on('clock.after', () => ({ value: undefined }))
   on('prompt.submit', (_: any, e: any) => {
     submitted.push(e.text)
@@ -30,10 +39,10 @@ const engine = (on: any) => {
   const box = { text: '' }
   on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
   on('prompt.fill', (_: any, e: any) => {
-    box.text = e.text
+    box.text = e.mode === 'insert' ? box.text + e.text : e.text
     return { isFilled: true }
   })
-  return { files, submitted, box }
+  return { files, submitted, box, panes }
 }
 
 test('park stores, lists, sends and archives', { options: { folder: '~/notes/' } }, async ($, on) => {
@@ -106,4 +115,53 @@ test('the box keeps what was typed after parking', async ($, on) => {
   await $.prompt.submit({ text: 'old idea /park', origin: { kind: 'composer' } } as any)
   await new Promise(resolve => setTimeout(resolve, 200))
   expect(box.text).toBe('a new thought')
+})
+
+const PANE = {
+  plugin: 'park',
+  component: 'Pane',
+  requestId: 'parked',
+  surface: 'terminal',
+  props: {
+    title: 'Parked',
+    isFocused: false,
+    bodyColumns: 44,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 20 },
+    view: {},
+  },
+} as any
+
+test('parking opens the pane; a click inserts the thought and archives it', async ($, on) => {
+  const { files, box, panes } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'park', args: 'first idea' })
+  await $.command.run({ command: 'park', args: 'second idea' })
+  expect(panes.opened).toBe(2)
+
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ type: 'Button', text: /second idea/ }))?.text).toContain('second idea')
+  await ui.press({ key: 'insert-1-2026-11-06 15:00 · app · feature/x' })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(box.text).toBe('second idea')
+  expect(files.get('/home/me/.claude/parked/parked.md')).not.toContain('second idea')
+  expect(files.get('/home/me/.claude/parked/parked-archive.md')).toContain('second idea')
+
+  await ui.press({ key: 'drop-0-2026-11-06 15:00 · app · feature/x' })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(box.text).toBe('second idea')
+  expect(files.get('/home/me/.claude/parked/parked-archive.md')).toContain('first idea')
+  expect(panes.closed).toBe(1)
+  expect((await ui.find({ type: 'Text', text: /Nothing parked/ }))?.text).toBe('Nothing parked.')
+  await ui.unmount()
+})
+
+test('/parked opens the pane when it can, else lists', async ($, on) => {
+  const { panes } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'park', args: 'x' })
+  panes.isPlaced = true
+  expect((await $.command.run({ command: 'parked', args: '' })).text).toBe('Parked pane opened.')
+  panes.isPlaced = false
+  expect((await $.command.run({ command: 'parked', args: '' })).text).toContain('1. x')
 })
