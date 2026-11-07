@@ -144,6 +144,14 @@ export const register: Register = (on, options) => {
     const body = match?.[1]?.trim() ?? ''
     if (e.command || e.origin.kind !== 'composer' || body === '') return next(e)
     const n = await park($, folder, body)
+    // A dropped prompt goes back into the box. Empty it once the drop has
+    // landed, but only while it still holds the parked text, so nothing typed
+    // since is lost. Two tries: the box may be refilled a beat after the hook.
+    const clear = async () => {
+      const box = await $.prompt.read()
+      if (box.text.trim() === e.text.trim()) await $.prompt.fill({ text: '', mode: 'replace' })
+    }
+    for (const ms of [0, 150]) $.clock.after(ms, () => void clear().catch(() => undefined))
     return { drop: `Parked #${n}.` }
   })
 

@@ -31,7 +31,7 @@ Park is the small tool between those two. The thought stays next to the session,
 ## What It Does
 
 - **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
-- **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked and never sent.
+- **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked, never sent, and the prompt box is emptied for the next one.
 - **A reminder above the prompt** - a dim `💡 N parked · /parked` line while anything is parked. It shares the band with other mods (a context meter, a button) and does not push them out.
 - **`/parked`** - lists what is parked, numbered, each with the time, the project and the git branch it was parked from.
 - **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.

@@ -27,7 +27,13 @@ const engine = (on: any) => {
     submitted.push(e.text)
     return { text: e.text }
   })
-  return { files, submitted }
+  const box = { text: '' }
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
+  on('prompt.fill', (_: any, e: any) => {
+    box.text = e.text
+    return { isFilled: true }
+  })
+  return { files, submitted, box }
 }
 
 test('park stores, lists, sends and archives', { options: { folder: '~/notes/' } }, async ($, on) => {
@@ -76,15 +82,28 @@ test('the band keeps what other mods drew', async ($, on) => {
 })
 
 test('a prompt that ends in /park is parked, not sent', async ($, on) => {
-  const { files, submitted } = engine(on)
+  const { files, submitted, box } = engine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  box.text = 'check the retry path /park'
 
   const parked = await $.prompt.submit({ text: 'check the retry path /park', origin: { kind: 'composer' } } as any)
   expect(parked).toEqual({ drop: 'Parked #1.' })
   expect(submitted).toEqual([])
   expect(files.get('/home/me/.claude/parked/parked.md')).toContain('check the retry path')
 
+  await new Promise(resolve => setTimeout(resolve, 200))
+  expect(box.text).toBe('')
+
   await $.prompt.submit({ text: 'a path like src/park stays a prompt', origin: { kind: 'composer' } } as any)
   await $.prompt.submit({ text: '/park', origin: { kind: 'composer' } } as any)
   expect(submitted).toEqual(['a path like src/park stays a prompt', '/park'])
+})
+
+test('the box keeps what was typed after parking', async ($, on) => {
+  const { box } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  box.text = 'a new thought'
+  await $.prompt.submit({ text: 'old idea /park', origin: { kind: 'composer' } } as any)
+  await new Promise(resolve => setTimeout(resolve, 200))
+  expect(box.text).toBe('a new thought')
 })
