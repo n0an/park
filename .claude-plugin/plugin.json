@@ -1,6 +1,6 @@
 {
   "name": "park",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Park a thought mid-session with /park so it stays out of the conversation, then click it in the Parked pane to put it back in the prompt",
   "author": { "name": "Anton Novoselov", "url": "https://github.com/n0an" },
   "license": "MIT",

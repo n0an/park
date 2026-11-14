@@ -7,7 +7,7 @@ type Engine = EngineInterface
 type Paths = { file: string; archive: string }
 
 const HEADER =
-  '# Parked\n\nThoughts parked mid-session with `/park`. Click one in the Parked pane (or `/parked send`) to hand it to Claude; sent and dropped ones move to `parked-archive.md`.\n'
+  '# Parked\n\nThoughts parked mid-session with `/park`. Each session sees only its own; click one in the Parked pane (or `/parked send`) to hand it to Claude. Sent and dropped ones move to `parked-archive.md`.\n'
 
 const PANE = 'parked'
 
@@ -19,12 +19,15 @@ const resolvePaths = async ($: Engine, folder: string): Promise<Paths> => {
   return { file: `${dir}/parked.md`, archive: `${dir}/parked-archive.md` }
 }
 
-// The parked list as the pane and the band draw it; the file stays the truth.
+// This session's parked list as the pane and the band draw it; the file stays the truth.
 const parked = atom({ plugin: 'park', key: 'entries' } as const, [] as ParkEntry[], {
-  shape: 'entries-1',
+  shape: 'entries-2',
 })
 
 type Entry = ParkEntry
+
+/** The hidden line under an entry's heading that names the session it was parked in. */
+const SESSION = /^<!--\s*session:\s*(\S+)\s*-->\s*/
 
 const parse = (text: string): Entry[] =>
   text
@@ -33,30 +36,45 @@ const parse = (text: string): Entry[] =>
     .map(chunk => {
       const newline = chunk.indexOf('\n')
       const title = (newline < 0 ? chunk : chunk.slice(0, newline)).trim()
-      const body = newline < 0 ? '' : chunk.slice(newline + 1).trim()
-      return { title, body }
+      const rest = newline < 0 ? '' : chunk.slice(newline + 1).trimStart()
+      const tag = SESSION.exec(rest)
+      const body = (tag ? rest.slice(tag[0].length) : rest).trim()
+      return tag ? { title, body, session: tag[1] } : { title, body }
     })
 
 const render = (entries: Entry[]): string =>
-  HEADER + entries.map(one => `\n## ${one.title}\n\n${one.body}\n`).join('')
+  HEADER +
+  entries
+    .map(one => {
+      const tag = one.session ? `<!-- session: ${one.session} -->\n` : ''
+      return `\n## ${one.title}\n${tag}\n${one.body}\n`
+    })
+    .join('')
+
+/** The entries this session sees: its own, plus old ones parked before entries had a session. */
+const mine = (entries: Entry[], session: string) =>
+  entries.filter(one => one.session === undefined || one.session === session)
 
 const load = async ($: Engine, at: Paths): Promise<Entry[]> => {
   const text = await $.fs.read(at.file).catch(() => '')
   return typeof text === 'string' ? parse(text) : []
 }
 
+/** Writes every session's entries; the pane and the band get this session's. */
 const save = async ($: Engine, at: Paths, entries: Entry[]) => {
   await $.fs.write(at.file, render(entries))
-  await update($, parked, () => entries)
+  const session = await $.session.id()
+  await update($, parked, () => mine(entries, session))
 }
 
 const refresh = async ($: Engine, folder: string) => {
   const entries = await load($, await resolvePaths($, folder))
-  await update($, parked, () => entries)
-  return entries
+  const session = await $.session.id()
+  await update($, parked, () => mine(entries, session))
 }
 
-const isSame = (a: Entry, b: Entry) => a.title === b.title && a.body === b.body
+const isSame = (a: Entry, b: Entry) =>
+  a.title === b.title && a.body === b.body && a.session === b.session
 
 const openPane = ($: Engine) => $.ui.open({ id: PANE, title: 'Parked', columns: 44 })
 
@@ -78,7 +96,7 @@ const take = async ($: Engine, folder: string, one: Entry, how: string) => {
   if (rest.length === entries.length) return
   await archive($, at, [one], how)
   await save($, at, rest)
-  if (rest.length === 0) await $.ui.close({ id: PANE })
+  if (mine(rest, await $.session.id()).length === 0) await $.ui.close({ id: PANE })
 }
 
 /** A click on a thought: into the prompt box at the cursor, then out of the list. */
@@ -149,19 +167,24 @@ const preview = (body: string) => clip(body, 100)
 /** A prompt that ends in "/park", the thought before it. */
 const TRAILING = /^([\s\S]*\S)\s+\/park\s*$/
 
-/** Appends one thought, shows the toast, and returns how many are parked. */
+/** Appends one thought, shows the toast, and returns how many this session has parked. */
 const park = async ($: Engine, folder: string, body: string): Promise<number> => {
   const at = await resolvePaths($, folder)
   const entries = await load($, at)
-  entries.push({ title: await stamp($), body })
+  const session = await $.session.id()
+  entries.push({ title: await stamp($), body, session })
   await save($, at, entries)
-  $.ui.toast(`Parked (${entries.length})`)
+  const n = mine(entries, session).length
+  $.ui.toast(`Parked (${n})`)
   void openPane($).catch(() => undefined)
-  return entries.length
+  return n
 }
 
 const USAGE =
-  '/parked: open or close the pane · /parked list · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
+  '/parked: open or close the pane · /parked list · /parked all: every session\'s · /parked send [n ...]: hand them to Claude · /parked drop n ... · /parked clear'
+
+/** When to look for the dropped prompt back in the box: the engine refills it a beat after the hook, later while a turn runs. */
+const REFILL_CHECKS_MS = [0, 100, 250, 500, 1000, 2000]
 
 export const register: Register = (on, options) => {
   const folder = typeof options.folder === 'string' ? options.folder : ''
@@ -196,21 +219,33 @@ export const register: Register = (on, options) => {
     const body = match?.[1]?.trim() ?? ''
     if (e.command || e.origin.kind !== 'composer' || body === '') return next(e)
     const n = await park($, folder, body)
-    // A dropped prompt goes back into the box. Empty it once the drop has
-    // landed, but only while it still holds the parked text, so nothing typed
-    // since is lost. Two tries: the box may be refilled a beat after the hook.
+    // A dropped prompt goes back into the box, sometimes well after the hook
+    // (a running turn delays it). Look for it a few times and empty the box
+    // the first time it holds the parked prompt: text that still ends in
+    // /park, which also matches a box that shows a paste as a placeholder
+    // while e.text has it expanded. Anything else in the box was typed since
+    // and is left alone, and the checks stop.
+    let isDone = false
     const clear = async () => {
+      if (isDone) return
       const box = await $.prompt.read()
-      if (box.text.trim() === e.text.trim()) await $.prompt.fill({ text: '', mode: 'replace' })
+      if (box.text.trim() === '') return
+      isDone = true
+      if (box.text.trim() === e.text.trim() || TRAILING.test(box.text)) {
+        await $.prompt.fill({ text: '', mode: 'replace' })
+      }
     }
-    for (const ms of [0, 150]) $.clock.after(ms, () => void clear().catch(() => undefined))
+    for (const ms of REFILL_CHECKS_MS) $.clock.after(ms, () => void clear().catch(() => undefined))
     return { drop: `Parked #${n}.` }
   })
 
   on('command.run', { command: 'parked' }, async ($, e) => {
     const [verb = '', ...args] = e.args.trim().split(/\s+/).filter(Boolean)
     const at = await resolvePaths($, folder)
-    const entries = await load($, at)
+    const all = await load($, at)
+    const session = await $.session.id()
+    const entries = mine(all, session)
+    const others = all.filter(one => !entries.includes(one))
     await update($, parked, () => entries)
 
     if (verb === '') {
@@ -221,11 +256,27 @@ export const register: Register = (on, options) => {
     if (verb === '' || verb === 'list') {
       if (entries.length === 0) return { text: 'Nothing parked.' }
       const lines = entries.map((one, i) => `${i + 1}. ${preview(one.body)}  [${one.title}]`)
-      return { text: [...lines, '', USAGE].join('\n') }
+      const elsewhere = others.length > 0 ? [`${others.length} more from other sessions: /parked all`] : []
+      return { text: [...lines, ...elsewhere, '', USAGE].join('\n') }
+    }
+
+    if (verb === 'all') {
+      if (all.length === 0) return { text: 'Nothing parked.' }
+      const row = (one: Entry) => `- ${preview(one.body)}  [${one.title}]`
+      const text = [
+        `This session (${entries.length}):`,
+        ...(entries.length > 0 ? entries.map(row) : ['- none']),
+        '',
+        `Other sessions (${others.length}):`,
+        ...(others.length > 0 ? others.map(row) : ['- none']),
+        '',
+        `All of them are in ${at.file}.`,
+      ]
+      return { text: text.join('\n') }
     }
 
     if (verb === 'send') {
-      const { chosen, rest, bad } = pick(entries, args)
+      const { chosen, bad } = pick(entries, args)
       if (bad.length > 0) return { text: `No such item: ${bad.join(', ')}. ${USAGE}` }
       if (chosen.length === 0) return { text: 'Nothing parked.' }
       const intro =
@@ -237,7 +288,7 @@ export const register: Register = (on, options) => {
         ...chosen.map((one, i) => `\n${i + 1}. (${one.title})\n${one.body}`),
       ].join('\n')
       await archive($, at, chosen, 'sent')
-      await save($, at, rest)
+      await save($, at, all.filter(one => !chosen.includes(one)))
       // A command.run hook may not submit itself (the turn would wait on it):
       // a timer submits once the hook has returned, and the prompt then
       // waits for the session to go idle.
@@ -250,7 +301,7 @@ export const register: Register = (on, options) => {
       const { chosen, rest, bad } = pick(entries, verb === 'clear' ? [] : args)
       if (bad.length > 0) return { text: `No such item: ${bad.join(', ')}.` }
       await archive($, at, chosen, 'dropped')
-      await save($, at, rest)
+      await save($, at, all.filter(one => !chosen.includes(one)))
       return { text: `Dropped ${chosen.length}; ${rest.length} left. Kept in parked-archive.md.` }
     }
 

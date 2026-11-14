@@ -1,8 +1,8 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const DIR = '/home/me/notes'
 
-const engine = (on: any) => {
+const engine = (on: any, { stubClock = true } = {}) => {
   const files = new Map<string, string>()
   const submitted: string[] = []
   on('command.register', (_: any, e: any) => ({ value: { command: e.name } }))
@@ -21,6 +21,8 @@ const engine = (on: any) => {
     return { value: { exitCode: 0, stdout, stderr: '' } }
   })
   on('session.root', () => ({ value: '/home/me/app' }))
+  const session = { id: 'session-a' }
+  on('session.id', () => ({ value: session.id }))
   on('ui.toast', () => ({ value: undefined }))
   const panes = { opened: 0, closed: 0, isPlaced: false, isUp: false }
   on('ui.open', () => {
@@ -38,7 +40,7 @@ const engine = (on: any) => {
       ? [{ id: 'parked', title: 'Parked', isShown: true, isFocused: false, isPlaced: true }]
       : [],
   }))
-  on('clock.after', () => ({ value: undefined }))
+  if (stubClock) on('clock.after', () => ({ value: undefined }))
   on('prompt.submit', (_: any, e: any) => {
     submitted.push(e.text)
     return { text: e.text }
@@ -49,7 +51,7 @@ const engine = (on: any) => {
     box.text = e.mode === 'insert' ? box.text + e.text : e.text
     return { isFilled: true }
   })
-  return { files, submitted, box, panes }
+  return { files, submitted, box, panes, session }
 }
 
 test('park stores, lists, sends and archives', { options: { folder: '~/notes/' } }, async ($, on) => {
@@ -175,4 +177,64 @@ test('/parked toggles the pane when it can, else lists', async ($, on) => {
   panes.isPlaced = false
   panes.isUp = false
   expect((await $.command.run({ command: 'parked', args: '' })).text).toContain('1. x')
+})
+
+test('each session sees only its own thoughts', async ($, on) => {
+  const { files, session } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'park', args: 'from a' })
+  session.id = 'session-b'
+  expect((await $.command.run({ command: 'park', args: 'from b' })).text).toBe('Parked #1.')
+
+  const file = files.get('/home/me/.claude/parked/parked.md') ?? ''
+  expect(file).toContain('<!-- session: session-a -->')
+  expect(file).toContain('<!-- session: session-b -->')
+
+  const list = (await $.command.run({ command: 'parked', args: 'list' })).text
+  expect(list).toContain('1. from b')
+  expect(list).not.toContain('from a')
+  expect(list).toContain('1 more from other sessions')
+
+  const all = (await $.command.run({ command: 'parked', args: 'all' })).text
+  expect(all).toContain('This session (1):')
+  expect(all).toContain('Other sessions (1):')
+  expect(all).toContain('from a')
+
+  await $.command.run({ command: 'parked', args: 'clear' })
+  expect(files.get('/home/me/.claude/parked/parked.md')).toContain('from a')
+  expect(files.get('/home/me/.claude/parked/parked.md')).not.toContain('from b')
+
+  session.id = 'session-a'
+  expect((await $.command.run({ command: 'parked', args: 'list' })).text).toContain('1. from a')
+})
+
+test('thoughts parked before sessions were tracked show in every session', async ($, on) => {
+  const { files, session } = engine(on)
+  files.set('/home/me/.claude/parked/parked.md', '# Parked\n\n## 2026-11-01 10:00 · app · main\n\nold idea\n')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await $.command.run({ command: 'parked', args: 'list' })).text).toContain('1. old idea')
+  session.id = 'session-b'
+  expect((await $.command.run({ command: 'parked', args: 'list' })).text).toContain('1. old idea')
+})
+
+test('the box is emptied when the parked prompt comes back late', async ($, on) => {
+  const clock = mock.clock(on)
+  const { box } = engine(on, { stubClock: false })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  box.text = ''
+  await $.prompt.submit({ text: 'late refill /park', origin: { kind: 'composer' } } as any)
+  await clock.advance(300)
+  box.text = 'late refill /park'
+  await clock.advance(1000)
+  expect(box.text).toBe('')
+})
+
+test('the box is emptied when it shows a paste as a placeholder', async ($, on) => {
+  const { box, files } = engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  box.text = 'look at [Pasted text #1 +3 lines] /park'
+  await $.prompt.submit({ text: 'look at line one\nline two\nline three /park', origin: { kind: 'composer' } } as any)
+  await new Promise(resolve => setTimeout(resolve, 200))
+  expect(box.text).toBe('')
+  expect(files.get('/home/me/.claude/parked/parked.md')).toContain('line three')
 })

@@ -2,7 +2,7 @@
 
 <p align="center">
     <img src="https://img.shields.io/badge/Claude%20Code-mod-D97757.svg" alt="Claude Code mod" />
-    <img src="https://img.shields.io/badge/version-0.2.1-blueviolet.svg" alt="Version 0.2.1" />
+    <img src="https://img.shields.io/badge/version-0.3.0-blueviolet.svg" alt="Version 0.3.0" />
     <img src="https://img.shields.io/badge/surface-terminal-2980b9.svg" alt="Terminal" />
     <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="MIT License" />
 </p>
@@ -32,13 +32,15 @@ Park is the small tool between those two. The thought stays next to the session,
 
 - **`/park <thought>`** - saves the thought and shows a `Parked (N)` toast. The command runs at once, even while Claude is in the middle of a turn, and does not interrupt that turn.
 - **`<thought> /park`** - the same from the end of the line. Already typed the thought? Add ` /park` and press Enter: the prompt is parked, never sent, and the prompt box is emptied for the next one.
+- **One list per session** - each session sees only the thoughts parked in it, so two terminals on the same project keep separate lists. `claude --resume` brings a session's thoughts back with it.
 - **The Parked pane** - opens beside the conversation when you park something. Each thought is one row with the time, the project and the git branch it was parked from. Click a thought to insert it into the prompt box at the cursor; it moves to the archive. Click `×` to drop it. The pane closes when the list is empty. Clicks need the fullscreen terminal (`"tui": "fullscreen"` in settings.json).
 - **A reminder above the prompt** - a dim `💡 N parked` line while anything is parked; click it to open or close the pane. It shares the band with other mods (a context meter, a button) and does not push them out.
 - **`/parked`** - opens the pane, or closes it if it is open. `/parked list` prints the numbered list instead.
+- **`/parked all`** - lists the thoughts of every session, this one first.
 - **`/parked send [n ...]`** - sends all parked thoughts, or only the numbers you give, to Claude as one prompt. If Claude is busy, the prompt waits until the turn ends.
 - **`/parked drop n ...` and `/parked clear`** - removes thoughts you no longer need.
 - **Nothing is lost** - sent and dropped thoughts move to `parked-archive.md`, with the time and how they left.
-- **Plain Markdown** - `parked.md` is a normal file. Put it in your notes vault, edit it by hand, and the counter catches up after the next turn.
+- **Plain Markdown** - `parked.md` is a normal file that holds every session's thoughts. Put it in your notes vault, edit it by hand, and the counter catches up after the next turn. Under each heading a hidden `<!-- session: ... -->` line names the session the thought belongs to; delete that line and the thought shows in every session.
 
 
 ## Installing
@@ -105,7 +107,8 @@ The output of `/parked list` is different. The list is printed in the transcript
 Everything is one hooks module, [`hooks/register.tsx`](hooks/register.tsx):
 
 - `session.start` registers `/park` and `/parked` with `immediate: true`, so they run during a turn instead of waiting for it to end;
-- a `prompt.submit` hook catches a prompt that ends in `/park`, parks the text before it, and answers `{ drop }`, so the prompt never enters the session; the engine puts a dropped prompt back in the box, so a timer then empties the box with `$.prompt.fill`, but only while it still holds the parked text;
+- a `prompt.submit` hook catches a prompt that ends in `/park`, parks the text before it, and answers `{ drop }`, so the prompt never enters the session; the engine puts a dropped prompt back in the box, sometimes a second or two later while a turn runs, so timers look for it over two seconds and empty the box with `$.prompt.fill` the first time it holds the parked prompt (text that still ends in `/park`, which also covers a paste shown as a placeholder); anything else in the box was typed since and is left alone;
+- each entry carries the id of the session it was parked in (`$.session.id()`), and the pane, the counter and `/parked` show only the current session's; entries with no id, parked before 0.3.0, show in every session;
 - `command.run` hooks answer both commands themselves, so nothing goes on to the model, and read and write the two Markdown files with `$.fs`;
 - `/parked send` submits the prompt with `$.prompt.submit` from a zero-delay timer, because a command hook cannot submit a prompt while the turn waits on it;
 - a `ui.render` hook on `Pane` draws the Parked pane, opened with `$.ui.open`: each thought is a `Button` whose press inserts its text with `$.prompt.fill({ mode: 'insert' })` and moves it to the archive;
